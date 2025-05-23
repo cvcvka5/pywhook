@@ -22,7 +22,7 @@ pip install pywhook
 ```
 
 ## Usage
-#### All functionalities
+#### Common functionalities
 ```python
 from pywhook import Webhook 
 import pprint

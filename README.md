@@ -116,7 +116,7 @@ req = webhook.wait_for_request(timeout=60)
 print("Received request:", req)
 
 files = webhook.download_request_content(req)
-print(f"Found {len(files)} file(s) attached.")
+print(f"Found {len(files.items())} file(s) attached.")
 
 for key, file_data in files.items():
     ext = file_data["filename"].split(".")[-1]
@@ -124,10 +124,6 @@ for key, file_data in files.items():
     with open(filename, "wb") as f:
         f.write(file_data["bytes"])
     print(f"Saved file {filename} ({file_data['size']} bytes)")
-
-    # Clean up test files if you want
-    os.remove(filename)
-
 ```
 ##### sender.py
 ```python

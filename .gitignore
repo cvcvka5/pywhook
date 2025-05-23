@@ -111,3 +111,7 @@ dmypy.json
 
 # VS Code workspace settings
 *.code-workspace
+
+
+dev_tests/*
+dev-tests/

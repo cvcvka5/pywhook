@@ -223,7 +223,7 @@ class Webhook:
         res.raise_for_status()
         return res.json()
 
-    def download_request_content(self, request: WebhookRequest) -> List[bytes]:
+    def download_request_content(self, request: WebhookRequest) -> Dict[str, Dict[str, Any]]:
         """
         Downloads file content attached to a webhook request.
 
@@ -243,17 +243,19 @@ class Webhook:
                 - 'content_type': MIME type of the file
         """
         
-        if isinstance(request, dict):
-            request_id = request.get('uuid')
-        else:
-            request_id = getattr(request, 'id', None)
+        request_id = request.get('uuid')
+  
         
         if not request_id:
             raise WebhookError("The provided request object does not have an 'id' or 'uuid' attribute/key.")
         
         out = {}
-        print(request['files'].values())
-        for key, file in request['files'].items():
+        try:
+            files = request['files'].items()
+        except AttributeError:
+            raise FileNotFoundError("File not found in request.")
+
+        for key, file in files:
             url = f"{self.BASE_URL}/token/{self.token_id}/request/{request_id}/download/{file['id']}"
             response = requests.get(url)
             if response.status_code != 200:

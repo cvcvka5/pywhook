@@ -8,9 +8,41 @@ import time
 
 class Webhook:
     """
-    Webhook class for interacting with https://webhook.site.
-    Allows creating tokens, retrieving requests, setting responses,
-    and managing request-listening callbacks.
+    A Python client for interacting with https://webhook.site.
+
+    This class allows you to:
+    - Create and delete webhook tokens.
+    - Retrieve received requests.
+    - Wait for new incoming requests.
+    - Download file content uploaded with requests.
+    - Set default responses for incoming requests.
+    - Attach callback functions to be notified on new requests.
+    - Access various token-specific URLs.
+
+    Usage example:
+        webhook = Webhook("your-token-uuid")
+        print(webhook.url)
+        webhook.set_response("Received", status=200)
+        req = webhook.wait_for_request(timeout=30)
+        files = webhook.download_request_content(req)
+        for key, file_data in files.items():
+            with open(f"{key}.{file_data['filename'].split('.')[-1]}", "wb") as f:
+                f.write(file_data["bytes"])
+    
+    Attributes:
+        token_id (str): The unique token ID from webhook.site.
+
+    Methods:
+        create_token: Class method to create a new token.
+        get_requests: Retrieve past requests for the token.
+        get_latest_request: Retrieve the most recent request.
+        wait_for_request: Block until a new request arrives or timeout.
+        set_response: Configure the default response for requests.
+        download_request_content: Download files uploaded with a request.
+        on_request: Attach a callback to be notified of new requests.
+        delete_token: Delete the token.
+        detach_callback: Remove a running callback.
+        detach_all_callbacks: Stop all running callbacks.
     """
 
     BASE_URL = 'https://webhook.site'
@@ -190,6 +222,47 @@ class Webhook:
         res = requests.put(url, json=payload)
         res.raise_for_status()
         return res.json()
+
+    def download_request_content(self, request: WebhookRequest) -> List[bytes]:
+        """
+        Downloads file content attached to a webhook request.
+
+        Args:
+            request (WebhookRequest): A webhook request object or dict containing request data.
+
+        Raises:
+            WebhookError: If the request object lacks an 'id' or 'uuid', or if downloading a file fails.
+
+        Returns:
+            dict: A dictionary where keys are file keys from the request, and values are dicts with:
+                - 'id': File ID on webhook.site
+                - 'filename': Original filename
+                - 'name': Field name used in the form
+                - 'bytes': Raw bytes of the file content
+                - 'size': Size in bytes
+                - 'content_type': MIME type of the file
+        """
+        
+        if isinstance(request, dict):
+            request_id = request.get('uuid')
+        else:
+            request_id = getattr(request, 'id', None)
+        
+        if not request_id:
+            raise WebhookError("The provided request object does not have an 'id' or 'uuid' attribute/key.")
+        
+        out = {}
+        print(request['files'].values())
+        for key, file in request['files'].items():
+            url = f"{self.BASE_URL}/token/{self.token_id}/request/{request_id}/download/{file['id']}"
+            response = requests.get(url)
+            if response.status_code != 200:
+                raise WebhookError(f"Failed to download request content: {response.status_code} - {response.text}")
+            out[key] = {"id": file['id'], "filename": file['filename'], "name": file['name'], "bytes": response.content, "size": file['size'], 'content_type': file['content_type']}
+        
+        return out
+
+
 
     @property
     def callbacks_on_request(self) -> List[Dict[str, Any]]:

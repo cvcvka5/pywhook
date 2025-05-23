@@ -21,7 +21,7 @@ pip install pywhook
 ```
 
 ## Usage
-
+#### All functionalities
 ```python
 from pywhook import Webhook 
 import pprint
@@ -95,6 +95,56 @@ webhook.detach_all_callbacks()
 print("\nDeleting token...")
 webhook.delete_token()
 print("Test complete. All tests passed. No issues present.")
+```
+
+#### Download a file sent via the webhook.
+##### receiver.py
+```python
+from pywhook import Webhook 
+
+# Create the token
+token_data = Webhook.create_token()
+
+# Initialize webhook instance
+webhook = Webhook(token_id)
+print(f"Using webhook URL: {webhook.url}")
+
+# Wait for the response that has the file attachment.
+req = webhook.wait_for_request(timeout=60)
+
+print("Received request:", req)
+
+files = webhook.download_request_content(req)
+print(f"Found {len(files)} file(s) attached.")
+
+for key, file_data in files.items():
+    ext = file_data["filename"].split(".")[-1]
+    filename = f"downloaded_{key}.{ext}"
+    with open(filename, "wb") as f:
+        f.write(file_data["bytes"])
+    print(f"Saved file {filename} ({file_data['size']} bytes)")
+
+    # Clean up test files if you want
+    os.remove(filename)
+
+```
+##### sender.py
+```python
+#client.py
+import requests
+
+webhook_url = "https://webhook.site/uuid"
+
+# Open the PNG file in binary mode
+files = {"testkey1": ("temp.jpg", open("temp.jpg", "rb"), "image/jpg"),
+         "testkey2": ("temp2.jpeg", open("temp2.jpeg", "rb"), "image/jpeg")}
+    
+response = requests.post(webhook_url, files=files)
+
+
+
+print(f"Status code: {response.status_code}")
+print("Response text:", response.text)
 ```
 
 ## License

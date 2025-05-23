@@ -113,5 +113,6 @@ dmypy.json
 *.code-workspace
 
 
-dev_tests/*
-dev-tests/
+**/dev_tests/*
+/dev_tests
+/dev_tests/*

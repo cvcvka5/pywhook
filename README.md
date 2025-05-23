@@ -12,6 +12,7 @@ and manage webhook listeners asynchronously.
 - Attach callbacks that trigger on new requests.
 - Customize default responses.
 - Thread-safe listener management.
+- Download files sent to the webhook.
 - Context manager support for automatic cleanup.
 
 ## Installation

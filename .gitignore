@@ -23,9 +23,7 @@ var/
 .installed.cfg
 *.egg
 MANIFEST
-setup.py
-pyproject.toml
-MANIFEST.info
+
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

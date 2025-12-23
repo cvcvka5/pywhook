@@ -12,11 +12,20 @@ class Webhook:
     """
     Lightweight Python client for interacting with https://webhook.site.
 
-    This class wraps the webhook.site HTTP API and provides:
+    Provides:
+
     - Token creation and deletion
-    - Request polling and callbacks
-    - Simple response configuration
+    - Request polling and background callbacks
+    - Default response configuration
     - Automatic cleanup via context manager
+
+    Example
+    -------
+    >>> token_data = Webhook.create_token()
+    >>> with Webhook(token_data["uuid"]) as hook:
+    ...     print(hook.url)
+    ...     req = hook.wait_for_request(timeout=10)
+    ...     print(req)
     """
 
     BASE_URL = "https://webhook.site"
@@ -32,9 +41,9 @@ class Webhook:
 
         Notes
         -----
-        This constructor intentionally validates the token type strictly.
-        Passing the result of `create_token()` directly is a common mistake;
-        make sure to pass `create_token()['uuid']` instead.
+        This constructor validates the token type strictly. A common mistake
+        is passing the result of `create_token()` directly; you should pass
+        `create_token()['uuid']`.
         """
         if not isinstance(uuid, str):
             raise TypeError(
@@ -43,23 +52,29 @@ class Webhook:
             )
 
         self.token_id = uuid
+        self._on_request_threads: List[Dict[str, Any]] = []  # Tracks background callbacks
 
-        # Tracks background threads created via `on_request`
-        self._on_request_threads: List[Dict[str, Any]] = []
+    # ------------------- Token Management -------------------
 
-    # Token management
     @staticmethod
     def create_token(**kwargs) -> Dict[str, Any]:
         """
-        Create a new webhook token on webhook.site.
+        Create a new webhook token.
 
-        Any keyword arguments are forwarded directly to the API request
-        (for example, headers or auth options).
+        Parameters
+        ----------
+        **kwargs
+            Optional arguments to forward to requests.post (headers, auth, etc.)
 
         Returns
         -------
         dict
-            Full JSON response returned by webhook.site, including the UUID.
+            Full JSON response from webhook.site including the UUID.
+
+        Raises
+        ------
+        WebhookError
+            If the token could not be created.
         """
         try:
             res = requests.post(f"{Webhook.BASE_URL}/token", **kwargs)
@@ -68,9 +83,7 @@ class Webhook:
             raise WebhookError(f"Failed to create token: {e}") from e
 
         if res.status_code != 201:
-            raise WebhookError(
-                f"Token creation failed: {res.status_code} {res.text}"
-            )
+            raise WebhookError(f"Token creation failed: {res.status_code} {res.text}")
 
         return res.json()
 
@@ -78,52 +91,67 @@ class Webhook:
         """
         Permanently delete the webhook token.
 
-        This is automatically called when exiting the context manager.
+        Automatically called when exiting the context manager.
+
+        Raises
+        ------
+        WebhookError
+            If deletion fails or returns an unexpected status.
         """
         try:
-            response = requests.delete(
-                f"{self.BASE_URL}/token/{self.token_id}"
-            )
+            response = requests.delete(f"{self.BASE_URL}/token/{self.token_id}")
             response.raise_for_status()
         except requests.RequestException as e:
             raise WebhookError(f"Failed to delete token: {e}") from e
 
         if response.status_code != 204:
-            raise WebhookError(
-                f"Unexpected response deleting token: {response.status_code}"
-            )
+            raise WebhookError(f"Unexpected response deleting token: {response.status_code}")
 
     def get_token_details(self) -> Dict[str, Any]:
         """
-        Fetch metadata and configuration for the current token.
+        Fetch metadata and configuration for the token.
+
+        Returns
+        -------
+        dict
+            JSON response from webhook.site describing the token.
+
+        Raises
+        ------
+        WebhookError
+            If the request fails.
         """
         try:
-            response = requests.get(
-                f"{self.BASE_URL}/token/{self.token_id}"
-            )
+            response = requests.get(f"{self.BASE_URL}/token/{self.token_id}")
             response.raise_for_status()
         except requests.RequestException as e:
             raise WebhookError(f"Failed to fetch token details: {e}") from e
 
         return response.json()
 
-    # URL helpers
+    # ------------------- URL Helpers -------------------
+
     @property
     def url(self) -> str:
         """
-        Primary webhook URL.
+        Return the primary webhook URL.
+
+        Returns
+        -------
+        str
+            The main webhook.site URL for this token.
         """
         return f"https://webhook.site/{self.token_id}"
 
     @property
     def urls(self) -> List[str]:
         """
-        Common alternative endpoints supported by webhook.site.
+        Return a list of alternative webhook endpoints.
 
         Returns
         -------
-        list[str]
-            A list of fully-formatted URLs and hook endpoints.
+        List[str]
+            Fully-formatted URLs and hook endpoints.
         """
         templates = [
             "https://webhook.site/{uuid}",
@@ -133,7 +161,8 @@ class Webhook:
         ]
         return [t.format(uuid=self.token_id) for t in templates]
 
-    # Request fetching
+    # ------------------- Request Fetching -------------------
+
     def get_requests(
         self,
         sorting: str = "newest",
@@ -145,21 +174,37 @@ class Webhook:
     ) -> List[Dict[str, Any]]:
         """
         Fetch previously received requests for this webhook.
+
+        Parameters
+        ----------
+        sorting : str
+            How to sort requests ('newest' or 'oldest').
+        per_page : int
+            Number of results per page.
+        page : int
+            Page number to fetch.
+        date_from : optional
+            Start date filter.
+        date_to : optional
+            End date filter.
+        query : optional
+            Search query filter.
+
+        Returns
+        -------
+        List[Dict[str, Any]]
+            List of request objects.
+
+        Raises
+        ------
+        WebhookError
+            If fetching requests fails.
         """
-        params = {
-            "sorting": sorting,
-            "per_page": per_page,
-            "page": page,
-            "date_from": date_from,
-            "date_to": date_to,
-            "query": query,
-        }
-        params = {k: v for k, v in params.items() if v is not None}
+        params = {k: v for k, v in locals().items() if v is not None and k != "self"}
 
         try:
             response = requests.get(
-                f"{self.BASE_URL}/token/{self.token_id}/requests",
-                params=params,
+                f"{self.BASE_URL}/token/{self.token_id}/requests", params=params
             )
             response.raise_for_status()
         except requests.RequestException as e:
@@ -169,27 +214,48 @@ class Webhook:
 
     def get_latest_request(self) -> Optional[Dict[str, Any]]:
         """
-        Return the most recent request, or None if no requests exist yet.
+        Return the most recent request.
+
+        Returns
+        -------
+        dict or None
+            The latest request, or None if no requests exist.
+
+        Raises
+        ------
+        WebhookError
+            If the request fails.
         """
         try:
-            response = requests.get(
-                f"{self.BASE_URL}/token/{self.token_id}/request/latest"
-            )
+            response = requests.get(f"{self.BASE_URL}/token/{self.token_id}/request/latest")
             if response.status_code == 404:
                 return None
             response.raise_for_status()
         except requests.RequestException as e:
-            raise WebhookError(
-                f"Failed to fetch latest request: {e}"
-            ) from e
+            raise WebhookError(f"Failed to fetch latest request: {e}") from e
 
         return response.json()
 
-    def wait_for_request(
-        self, timeout: int = 15, interval: float = 0.1
-    ) -> Dict[str, Any]:
+    def wait_for_request(self, timeout: int = 15, interval: float = 0.1) -> Dict[str, Any]:
         """
-        Block until a new request arrives or the timeout is reached.
+        Block until a new request arrives or timeout is reached.
+
+        Parameters
+        ----------
+        timeout : int
+            Maximum seconds to wait.
+        interval : float
+            Polling interval in seconds.
+
+        Returns
+        -------
+        dict
+            The new request object.
+
+        Raises
+        ------
+        TimeoutError
+            If no new request arrives within the timeout.
         """
         latest = self.get_latest_request()
         last_uuid = latest.get("uuid") if latest else None
@@ -203,20 +269,25 @@ class Webhook:
 
         raise TimeoutError(f"No new request after {timeout} seconds")
 
-    # Callbacks
-    def on_request(
-        self,
-        callback: Callable[[Dict[str, Any]], None],
-        interval: float = 0.1,
-    ) -> None:
-        """
-        Register a callback that fires whenever a new request arrives.
+    # ------------------- Callbacks -------------------
 
-        The callback runs in a background thread and receives the request
-        payload as a dictionary.
+    def on_request(self, callback: Callable[[Dict[str, Any]], None], interval: float = 0.1) -> None:
         """
+        Register a callback that fires for every new request.
 
-        def listen(last_uuid: Optional[str]):
+        Parameters
+        ----------
+        callback : Callable[[dict], None]
+            Function called with the request dictionary.
+        interval : float
+            How often to poll for new requests (seconds).
+
+        Notes
+        -----
+        The callback runs in a background daemon thread. Transient API errors
+        are ignored, so your function may miss some requests if the API fails.
+        """
+        def listener(last_uuid: Optional[str]):
             while not kill_event.is_set():
                 try:
                     req = self.get_latest_request()
@@ -224,7 +295,6 @@ class Webhook:
                         callback(req)
                         last_uuid = req.get("uuid")
                 except WebhookError:
-                    # Ignore transient API errors and keep listening
                     pass
                 time.sleep(interval)
 
@@ -232,27 +302,33 @@ class Webhook:
         latest = self.get_latest_request()
         last_uuid = latest.get("uuid") if latest else None
 
-        thread = threading.Thread(
-            target=listen,
-            args=(last_uuid,),
-            daemon=True,
-        )
-
-        self._on_request_threads.append(
-            {"thread": thread, "kill_event": kill_event}
-        )
+        thread = threading.Thread(target=listener, args=(last_uuid,), daemon=True)
+        self._on_request_threads.append({"thread": thread, "kill_event": kill_event})
         thread.start()
 
     @property
     def callbacks_on_request(self) -> List[Dict[str, Any]]:
-        """
-        Return currently active request listeners.
-        """
+        """Return a list of active request listener threads and kill events."""
         return self._on_request_threads
 
     def detach_callback(self, index: int) -> List[Dict[str, Any]]:
         """
-        Stop and remove a single callback by index.
+        Stop and remove a callback by its index.
+
+        Parameters
+        ----------
+        index : int
+            Index of the callback to remove.
+
+        Returns
+        -------
+        List[Dict[str, Any]]
+            Updated list of active callbacks.
+
+        Raises
+        ------
+        IndexError
+            If the index is out of range.
         """
         if index >= len(self._on_request_threads):
             raise IndexError("Callback index out of range.")
@@ -261,57 +337,72 @@ class Webhook:
         entry["kill_event"].set()
         entry["thread"].join()
         self._on_request_threads.pop(index)
-
         return self.callbacks_on_request
 
     def detach_all_callbacks(self) -> None:
-        """
-        Stop and remove all active callbacks.
-        """
+        """Stop and remove all active request callbacks."""
         for entry in self._on_request_threads:
             entry["kill_event"].set()
             entry["thread"].join()
-
         self._on_request_threads.clear()
 
-    # Response control
-    def set_response(
-        self,
-        content,
-        status: int = 200,
-        content_type: str = "text/plain",
-    ) -> Dict[str, Any]:
+    # ------------------- Response Control -------------------
+
+    def set_response(self, content: str, status: int = 200, content_type: str = "text/plain") -> Dict[str, Any]:
         """
-        Configure the default response returned by the webhook.
+        Configure the default response for the webhook.
+
+        Parameters
+        ----------
+        content : str
+            Default response content.
+        status : int
+            HTTP status code.
+        content_type : str
+            MIME type of the response.
+
+        Returns
+        -------
+        dict
+            JSON response confirming the update.
+
+        Raises
+        ------
+        WebhookError
+            If the request fails.
         """
-        payload = {
-            "default_content": content,
-            "default_status": status,
-            "default_content_type": content_type,
-        }
+        payload = {"default_content": content, "default_status": status, "default_content_type": content_type}
 
         try:
-            res = requests.put(
-                f"{self.BASE_URL}/token/{self.token_id}",
-                json=payload,
-            )
+            res = requests.put(f"{self.BASE_URL}/token/{self.token_id}", json=payload)
             res.raise_for_status()
         except requests.RequestException as e:
             raise WebhookError(f"Failed to set response: {e}") from e
 
         return res.json()
 
-    def download_request_content(
-        self, request: Dict[str, Any]
-    ) -> Dict[str, Dict[str, Any]]:
+    def download_request_content(self, request: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """
         Download uploaded files attached to a request.
+
+        Parameters
+        ----------
+        request : dict
+            Request object returned by webhook.site API.
+
+        Returns
+        -------
+        dict[str, dict]
+            Mapping of file keys to their data including bytes, filename, and content type.
+
+        Raises
+        ------
+        WebhookError
+            If request object is invalid or download fails.
         """
         request_id = request.get("uuid") or request.get("id")
         if not request_id:
-            raise WebhookError(
-                "Request object missing 'uuid' or 'id'."
-            )
+            raise WebhookError("Request object missing 'uuid' or 'id'.")
 
         files = request.get("files", {})
         if not files:
@@ -319,17 +410,12 @@ class Webhook:
 
         out = {}
         for key, file in files.items():
-            url = (
-                f"{self.BASE_URL}/token/{self.token_id}"
-                f"/request/{request_id}/download/{file['id']}"
-            )
+            url = f"{self.BASE_URL}/token/{self.token_id}/request/{request_id}/download/{file['id']}"
             try:
                 response = requests.get(url)
                 response.raise_for_status()
             except requests.RequestException as e:
-                raise WebhookError(
-                    f"Failed to download file {file['id']}: {e}"
-                ) from e
+                raise WebhookError(f"Failed to download file {file['id']}: {e}") from e
 
             out[key] = {
                 "id": file["id"],
@@ -339,17 +425,15 @@ class Webhook:
                 "size": file["size"],
                 "content_type": file["content_type"],
             }
-
         return out
 
-    # Context manager
-    def __enter__(self):
-        """
-        Allow usage via `with Webhook(...) as hook:`.
-        """
+    # ------------------- Context Manager -------------------
+
+    def __enter__(self) -> "Webhook":
+        """Allow usage via `with Webhook(...) as hook:`."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """
         Ensure all callbacks are stopped and the token is deleted
         when leaving the context.

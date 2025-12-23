@@ -15,7 +15,7 @@ class Webhook:
 
     BASE_URL = 'https://webhook.site'
 
-    def __init__(self, uuid: str, auto_delete: bool = False):
+    def __init__(self, uuid: str):
         """
         Initialize the Webhook with a token ID.
 
@@ -23,9 +23,12 @@ class Webhook:
             uuid (str): Unique token ID provided by webhook.site.
             auto_delete (bool): If True, token will be deleted on context exit.
         """
+        if not isinstance(uuid, str):
+            raise TypeError("Argument UUID must be of type string. \
+If you passed create_token() directly make sure to pass create_token()['uuid'].")
+        
         self.token_id = uuid
         self._on_request_threads: List[Dict[str, Any]] = []
-        self._auto_delete = auto_delete
 
     # ------------------- Token Management -------------------
 
@@ -215,5 +218,4 @@ class Webhook:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.detach_all_callbacks()
-        if self._auto_delete:
-            self.delete_token()
+        self.delete_token()

@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='pywhook',
-    version='1.1.5', 
+    version='1.1.7', 
     author='Ulus Vatansever',
     author_email='ulusvatansever@gmail.com',
     description='Python wrapper for webhook.site API',
